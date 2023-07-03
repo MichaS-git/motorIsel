@@ -1,0 +1,29 @@
+dbLoadTemplate("motor.substitutions.iMC")
+
+# linux
+#drvAsynSerialPortConfigure("serial1", "/dev/ttyACM0", 0, 0, 0)
+# windows
+drvAsynSerialPortConfigure("serial1","COM2", 0, 0, 0)
+asynSetOption("serial1", -1, "baud", "19200")
+asynSetOption("serial1", -1, "bits", "8")
+asynSetOption("serial1", -1, "parity", "none")
+asynSetOption("serial1", -1, "stop", "1")
+
+# Turn on asyn traces
+#asynSetTraceIOMask("serial1",0,0x255)
+#asynSetTraceMask("serial1",0,0x255)
+#asynSetTraceFile("serial1",0,"isel.txt")
+
+###
+# iMCCreateController(
+#    motor port (will be created),
+#    asyn port (must already exist),
+#    num axes,
+#    moving poll period (ms),
+#    idle poll period (ms),
+###
+iMCCreateController("iMC_1", "serial1", 4, 0, 1000)
+
+# Turn off asyn traces
+#asynSetTraceIOMask("serial1",0,0x0)
+#asynSetTraceMask("serial1",0,0x1)

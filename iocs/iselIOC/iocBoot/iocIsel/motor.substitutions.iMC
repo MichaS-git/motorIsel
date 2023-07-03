@@ -1,0 +1,9 @@
+file "$(MOTOR)/motorApp/Db/asyn_motor.db"
+{
+  pattern
+  {P,             M,  DTYP,        PORT,     ADDR,  DESC,    EGU,      DIR,  VMAX,  VELO,  VBAS,  ACCL,  BDST,     BVEL,  BACC,     MRES,      PREC,  DHLM,       DLLM,   INIT}
+  {isel:,         m1, "asynMotor", iMC_1,      0,  "x Laengs",    mm,       Pos,  25.,     15.,   0.1,   0.1,     0,      1.0,     2,	   0.0125,         5,     0,       0,    ""}
+  {isel:,         m2, "asynMotor", iMC_1,      1,  "y Quer",      mm,       Pos,  25.,     10.,   0.1,   0.1,     0,      1.0,     2,	   0.015625,       5,     0,       0,    ""}
+  {isel:,         m3, "asynMotor", iMC_1,      2,  "z Hoehe",     mm,       Pos,  5.,      1.,    0.1,   0.1,     0,      1.0,     2,	   0.00125,        5,     0,       0,    ""}
+  {isel:,         m4, "asynMotor", iMC_1,      3,  "w Rot",       deg,      Pos,  50.,     10.,    0.1,   0.1,     0,      1.0,     2,	   0.00125,        5,     0,       0,    ""}
+}

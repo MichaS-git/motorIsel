@@ -1,4 +1,4 @@
-# motorOwis
+# motorIsel
 EPICS motor drivers for the following [Isel](https://www.isel.com/en/multiple-axis-controller-imc-s8.html) controller: Step-Controller iMC-XX
 
 motorOwis is a submodule of [motor](https://github.com/epics-modules/motor).  When motorOwis is built in the ``motor/modules`` directory, no manual configuration is needed.

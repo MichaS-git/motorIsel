@@ -1,0 +1,10 @@
+2023/06/06 13:23:54.067 asynOctetSyncIO setOutputEos eoslen 2
+2023/06/06 13:23:54.070 asynOctetSyncIO wrote:
+2023/06/06 13:23:56.085 asynOctetSyncIO wrote:
+@0P
+2023/06/06 13:23:58.114 asynOctetSyncIO wrote:
+@0P
+2023/06/06 13:24:00.146 asynOctetSyncIO wrote:
+@0P
+2023/06/06 13:24:02.175 asynOctetSyncIO wrote:
+@0P

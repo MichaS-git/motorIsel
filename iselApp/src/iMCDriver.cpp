@@ -32,10 +32,12 @@ April 25, 2023
   * \param[in] numAxes           The number of axes that this controller supports
   * \param[in] movingPollPeriod  The time between polls when any axis is moving
   * \param[in] idlePollPeriod    The time between polls when no axis is moving
+  * \param[in] initCmds          Possible List with initialization commands for the controller
   */
 iMCController::iMCController(const char *portName, const char *iMCPortName, int numAxes, double movingPollPeriod,
-                             double idlePollPeriod)
-    :  asynMotorController(portName, numAxes, NUM_iMC_PARAMS,
+                             double idlePollPeriod, const char *initCmds)
+    :  asynMotorController(portName, numAxes,
+                           0, // No controller parameters
                            0, // No additional interfaces beyond those in base class
                            0, // No additional callback interfaces beyond those in base class
                            ASYN_CANBLOCK | ASYN_MULTIDEVICE,
@@ -49,7 +51,7 @@ iMCController::iMCController(const char *portName, const char *iMCPortName, int 
 
     /* Connect to iMC controller */
     status = pasynOctetSyncIO->connect(iMCPortName, 0, &pasynUserController_, NULL);
-    pasynOctetSyncIO->setOutputEos(pasynUserController_, "\r", 2);
+    pasynOctetSyncIO->setOutputEos(pasynUserController_, "\r", 1);
     if (status)
     {
         asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
@@ -59,6 +61,12 @@ iMCController::iMCController(const char *portName, const char *iMCPortName, int 
 
     // Flush I/O in case there is lingering garbage
     writeReadController();
+
+    // how many bytes do we expect as an answer
+    // normaly 1 ('0' when all fine) except when asking position
+    expectedBytes_ = 1;
+
+    totalAxesNum_ = numAxes;
 
     // initialize the controller with the desired numAxes
     if (numAxes == 1) {
@@ -79,17 +87,18 @@ iMCController::iMCController(const char *portName, const char *iMCPortName, int 
 
     status = writeReadController();
 
-    /* endschalter low-aktiv + aktivieren */
-    sprintf(outString_, "@0IE57343");
-    status = writeReadController();
+    // go through the init commands and send them to controller
+    if (initCmds) {
+        std::string str = initCmds;
+        std::stringstream text_stream(initCmds);
+        std::string item;
 
-    /* X-Achsrichtung invertieren */
-    sprintf(outString_, "@0ID13");
-    status = writeReadController();
-
-    /* bei X-Achse Endschalter vertauschen */
-    sprintf(outString_, "@0Ie9");
-    status = writeReadController();
+        while (std::getline(text_stream, item, ',')) {
+            //std::cout << item.c_str() << " init command\n";
+            sprintf(outString_, item.c_str());
+            status = writeReadController();
+        }
+    }
 
     for (axis=0; axis<numAxes; axis++)
     {
@@ -106,12 +115,13 @@ iMCController::iMCController(const char *portName, const char *iMCPortName, int 
   * \param[in] numAxes           The number of axes that this controller supports
   * \param[in] movingPollPeriod  The time in ms between polls when any axis is moving
   * \param[in] idlePollPeriod    The time in ms between polls when no axis is moving
+  * \param[in] initCmds          Possible List with initialization commands for the controller
   */
 extern "C" int iMCCreateController(const char *portName, const char *iMCPortName, int numAxes, int movingPollPeriod,
-                                   int idlePollPeriod)
+                                   int idlePollPeriod, const char *initCmds)
 {
     iMCController *piMCController
-        = new iMCController(portName, iMCPortName, numAxes, movingPollPeriod/1000., idlePollPeriod/1000.);
+        = new iMCController(portName, iMCPortName, numAxes, movingPollPeriod/1000., idlePollPeriod/1000., initCmds);
     piMCController = NULL;
     return(asynSuccess);
 }
@@ -157,20 +167,27 @@ asynStatus iMCController::writeReadController(const char *output, char *input,
     int eomReason;
     // const char *functionName="writeReadController";
 
+    maxChars = expectedBytes_;
+
+    // the controller won't respond during a movement
+    // if a movement takes longer than default timeout (2s), set timeout to movement duration
+    if (timeout_ > timeout) timeout = timeout_;
+
     status = pasynOctetSyncIO->writeRead(pasynUserController_, output,
                                          strlen(output), input, maxChars, timeout,
                                          &nwrite, nread, &eomReason);
-    // the first character is the handshake character; if it is zero, don't send it as answer
-    if (input[0] == '0') {
-        if (27 < strlen(input)) {
-            memmove(input, input, 2);
-            std::cout << input << " input, not working to cut, to do ...\n";
-        } else if (24 < strlen(input) && strlen(input) < 27) {
-            memmove(input, input+(strlen(input) - 24), strlen(input));
+
+    if (!status) {
+        // the first character is the handshake character; if it is zero, everything is fine
+        if (input[0] == '0') {
+                // omit the handshake character
+                memmove(input, input+1, strlen(input));
         } else {
-            memmove(input, input+1, strlen(input));
+            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
+                    "ERROR, handshake character returned: %i\n", input[0]);
         }
-    }
+        // to do: what is status=3 ?? put status back to 0 ??
+    } //else status = asynError;
 
     return status;
 }
@@ -186,55 +203,60 @@ asynStatus iMCController::writeReadController(const char *output, char *input,
   */
 asynStatus iMCController::poll()
 {
-    char posResponse[30];
-    std::string str, x, y, z, a;
+    char posResponse[24];
+    std::string str;
     std::stringstream ss_x, ss_y, ss_z, ss_a;
 
     asynStatus comStatus = asynSuccess;
+
+    // if the controller has 4 axes, it returns all 4 positions: 24 bytes + 1 byte handshake
+    // else, it returns always 3 positions 18 bytes + 1 byte handshake
+    if (totalAxesNum_ < 4) expectedBytes_ = 19;
+    else expectedBytes_ = 25;
 
     // Read the current motor position
     sprintf(outString_, "@0P");
     comStatus = writeReadController();
 
-    //std::cout << inString_ << " inString_\n";
+    strcpy(posResponse, inString_);
 
-    if (strlen(inString_) == 24) {
+    if (!comStatus) {
+        if (totalAxesNum_ == 4) {
 
-        axisXdone_ = 1;
-        axisYdone_ = 1;
-        axisZdone_ = 1;
-        axisAdone_ = 1;
+            axisXdone_ = 1;
+            axisYdone_ = 1;
+            axisZdone_ = 1;
+            axisAdone_ = 1;
 
-        strcpy(posResponse, inString_);
+            // the response-string contains positions of all axes
+            // each axis has a length of 6
+            str = posResponse;
 
-        // the response-string contains positions of all axes
-        // each axis has a length of 6
-        str = posResponse;
+            ss_x << std::hex << str.substr(0, 6);
+            ss_y << std::hex << str.substr(6, 6);
+            ss_z << std::hex << str.substr(12, 6);
+            ss_a << std::hex << str.substr(18, 6);
+            ss_x >> axisXpos_;
+            ss_y >> axisYpos_;
+            ss_z >> axisZpos_;
+            ss_a >> axisApos_;
+        } else {
 
-        x = str.substr(0, 6);
-        y = str.substr(6, 6);
-        z = str.substr(12, 6);
-        a = str.substr(18, 6);
-        ss_x << std::hex << x;
-        ss_y << std::hex << y;
-        ss_z << std::hex << z;
-        ss_a << std::hex << a;
-        ss_x >> axisXpos_;
-        ss_y >> axisYpos_;
-        ss_z >> axisZpos_;
-        ss_a >> axisApos_;
+            axisXdone_ = 1;
+            axisYdone_ = 1;
+            axisZdone_ = 1;
 
-        /*
-        // Read the limit states; this takes to long to read ...
-        // don't ask for now
-        sprintf(outString_, "@0DRp");
-        comStatus = writeReadController();
-        std::cout << inString_ << " inString_ pos limit\n";
+            // the response-string contains positions of all axes
+            // each axis has a length of 6
+            str = posResponse;
 
-        sprintf(outString_, "@0DRn");
-        comStatus = writeReadController();
-        std::cout << inString_ << " inString_ neg limit\n";
-        */
+            ss_x << std::hex << str.substr(0, 6);
+            ss_y << std::hex << str.substr(6, 6);
+            ss_z << std::hex << str.substr(12, 6);
+            ss_x >> axisXpos_;
+            ss_y >> axisYpos_;
+            ss_z >> axisZpos_;
+        }
     }
 
     return comStatus ? asynError : asynSuccess;
@@ -252,9 +274,7 @@ iMCAxis::iMCAxis(iMCController *pC, int axisNo)
     : asynMotorAxis(pC, axisNo),
       pC_(pC)
 {
-    int errorFlag = 0;
-    //asynStatus status;
-    static const char *functionName = "iMCAxis::iMCAxis";
+    //static const char *functionName = "iMCAxis::iMCAxis";
 
     // controller axes are numbered from 1
     axisIndex_ = axisNo + 1;
@@ -281,52 +301,72 @@ void iMCAxis::report(FILE *fp, int level)
 
 asynStatus iMCAxis::move(double position, int relative, double minVelocity, double maxVelocity, double acceleration)
 {
-    asynStatus status;
-    double relPosition;
+    asynStatus comStatus = asynSuccess;
+    double relPosition=0;
     // static const char *functionName = "iMCAxis::move";
 
     // we drive only relative because of zero relative means the axis will not be touched
-    if (axisIndex_ == 1) {
-        relPosition = position - pC_->axisXpos_;
-        sprintf(pC_->outString_, "@0A %d,%d,0,500,0,500,0,500", NINT(relPosition), NINT(maxVelocity));
-        pC_->axisXdone_ = 0;
-    } else if (axisIndex_ == 2) {
-        relPosition = position - pC_->axisYpos_;
-        sprintf(pC_->outString_, "@0A 0,500,%d,%d,0,500,0,500", NINT(relPosition), NINT(maxVelocity));
-        pC_->axisYdone_ = 0;
-    } else if (axisIndex_ == 3) {
-        relPosition = position - pC_->axisZpos_;
-        sprintf(pC_->outString_, "@0A 0,500,0,500,%d,%d,0,500", NINT(relPosition), NINT(maxVelocity));
-        pC_->axisZdone_ = 0;
-    } else if (axisIndex_ == 4) {
-        relPosition = position - pC_->axisApos_;
-        sprintf(pC_->outString_, "@0A 0,500,0,500,0,500,%d,%d", NINT(relPosition), NINT(maxVelocity));
-        pC_->axisAdone_ = 0;
-    }
+	if (pC_->totalAxesNum_ == 4) {
+		if (axisIndex_ == 1) {
+			relPosition = position - pC_->axisXpos_;
+			sprintf(pC_->outString_, "@0A %d,%d,0,500,0,500,0,500", NINT(relPosition), NINT(maxVelocity));
+			pC_->axisXdone_ = 0;
+		} else if (axisIndex_ == 2) {
+			relPosition = position - pC_->axisYpos_;
+			sprintf(pC_->outString_, "@0A 0,500,%d,%d,0,500,0,500", NINT(relPosition), NINT(maxVelocity));
+			pC_->axisYdone_ = 0;
+		} else if (axisIndex_ == 3) {
+			relPosition = position - pC_->axisZpos_;
+			sprintf(pC_->outString_, "@0A 0,500,0,500,%d,%d,0,500", NINT(relPosition), NINT(maxVelocity));
+			pC_->axisZdone_ = 0;
+		} else if (axisIndex_ == 4) {
+			relPosition = position - pC_->axisApos_;
+			sprintf(pC_->outString_, "@0A 0,500,0,500,0,500,%d,%d", NINT(relPosition), NINT(maxVelocity));
+			pC_->axisAdone_ = 0;
+		}
+	} else if (pC_->totalAxesNum_ == 2) {
+		if (axisIndex_ == 1) {
+			relPosition = position - pC_->axisXpos_;
+			sprintf(pC_->outString_, "@0A %d,%d,0,500", NINT(relPosition), NINT(maxVelocity));
+			pC_->axisXdone_ = 0;
+		} else if (axisIndex_ == 2) {
+			relPosition = position - pC_->axisYpos_;
+			sprintf(pC_->outString_, "@0A 0,500,%d,%d", NINT(relPosition), NINT(maxVelocity));
+			pC_->axisYdone_ = 0;
+		}
+	}
 
-    status = pC_->writeController();
-    // stop the polling for the driving time because the controller won't answer anyway
-    epicsThreadSleep(abs(NINT(relPosition)/NINT(maxVelocity)));
+    pC_->expectedBytes_ = 1;
+    pC_->timeout_ = abs(relPosition/maxVelocity);
+    comStatus = pC_->writeReadController();
 
-    return status;
+    return comStatus ? asynError : asynSuccess;
 }
 
 asynStatus iMCAxis::home(double minVelocity, double maxVelocity, double acceleration, int forwards)
 {
-    asynStatus status;
+    asynStatus comStatus = asynSuccess;
 
     // static const char *functionName = "iMCAxis::home";
     if (axisIndex_ < 3) {
         sprintf(pC_->outString_, "@0R%i", axisIndex_);
+        if (axisIndex_ == 1) {
+            pC_->axisXdone_ = 0;
+        } else if (axisIndex_ == 2) {
+            pC_->axisYdone_ = 0;
+        }
     } else if (axisIndex_ == 3) {
         sprintf(pC_->outString_, "@0R4");
+        pC_->axisZdone_ = 0;
     } else if (axisIndex_ == 4) {
         sprintf(pC_->outString_, "@0R8");
+        pC_->axisAdone_ = 0;
     }
 
-    status = pC_->writeController();
+    pC_->expectedBytes_ = 1;
+    comStatus = pC_->writeReadController();
 
-    return status;
+    return comStatus ? asynError : asynSuccess;
 }
 
 /** Polls the axis.
@@ -336,7 +376,7 @@ asynStatus iMCAxis::home(double minVelocity, double maxVelocity, double accelera
   * \param[out] moving A flag that is set indicating that the axis is moving (true) or done (false). */
 asynStatus iMCAxis::poll(bool *moving)
 {
-    asynStatus comStatus = asynSuccess;
+    asynStatus status = asynSuccess;
 
     if (axisIndex_ == 1) {
         setDoubleParam(pC_->motorPosition_, pC_->axisXpos_);
@@ -356,30 +396,8 @@ asynStatus iMCAxis::poll(bool *moving)
         setIntegerParam(pC_->motorStatusDone_, pC_->axisAdone_);
     }
 
-    // Read the limit status
-    /*sprintf(pC_->outString_, "%02d?ESTAT1", slaveID_);
-    comStatus = pC_->writeReadController();
-    if (comStatus) goto skip;
-    // The response string is of the form "10101"
-    sscanf(pC_->inString_, "%d", &limit);
-    if (limit == 8)
-    {
-        setIntegerParam(pC_->motorStatusHighLimit_, 1);
-    }
-    if (limit == 1)
-    {
-        setIntegerParam(pC_->motorStatusLowLimit_, 1);
-    }
-    if (limit == 0)
-    {
-        setIntegerParam(pC_->motorStatusHighLimit_, 0);
-        setIntegerParam(pC_->motorStatusLowLimit_, 0);
-    }*/
-
-    // for now we can't see if there is a controller problem
-    //setIntegerParam(pC_->motorStatusProblem_, 0);
     callParamCallbacks();
-    return comStatus ? asynError : asynSuccess;
+    return status;
 }
 
 /** Code for iocsh registration */
@@ -388,16 +406,18 @@ static const iocshArg iMCCreateControllerArg1 = {"Controller port name", iocshAr
 static const iocshArg iMCCreateControllerArg2 = {"Number of axes", iocshArgInt};
 static const iocshArg iMCCreateControllerArg3 = {"Moving poll period (ms)", iocshArgInt};
 static const iocshArg iMCCreateControllerArg4 = {"Idle poll period (ms)", iocshArgInt};
+static const iocshArg iMCCreateControllerArg5 = {"Controller Init Commands", iocshArgString};
 static const iocshArg * const iMCCreateControllerArgs[] = {&iMCCreateControllerArg0,
                                                             &iMCCreateControllerArg1,
                                                             &iMCCreateControllerArg2,
                                                             &iMCCreateControllerArg3,
                                                             &iMCCreateControllerArg4,
+                                                            &iMCCreateControllerArg5,
                                                            };
-static const iocshFuncDef iMCCreateControllerDef = {"iMCCreateController", 5, iMCCreateControllerArgs};
+static const iocshFuncDef iMCCreateControllerDef = {"iMCCreateController", 6, iMCCreateControllerArgs};
 static void iMCCreateContollerCallFunc(const iocshArgBuf *args)
 {
-    iMCCreateController(args[0].sval, args[1].sval, args[2].ival, args[3].ival, args[4].ival);
+    iMCCreateController(args[0].sval, args[1].sval, args[2].ival, args[3].ival, args[4].ival, args[5].sval);
 }
 
 static void iMCRegister(void)

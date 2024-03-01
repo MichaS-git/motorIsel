@@ -10,9 +10,6 @@ April 25, 2023
 #include "asynMotorController.h"
 #include "asynMotorAxis.h"
 
-// No controller-specific parameters yet
-#define NUM_iMC_PARAMS 0
-
 class iMCAxis : public asynMotorAxis
 {
 public:
@@ -34,7 +31,7 @@ private:
 class iMCController : public asynMotorController
 {
 public:
-    iMCController(const char *portName, const char *iMCPortName, int numAxes, double movingPollPeriod, double idlePollPeriod);
+    iMCController(const char *portName, const char *iMCPortName, int numAxes, double movingPollPeriod, double idlePollPeriod, const char *initCmds);
 
     /* These are the methods that we override from asynMotorDriver */
     void report(FILE *fp, int level);
@@ -43,7 +40,9 @@ public:
     asynStatus poll();
 
 private:
-    int done_;
+    int totalAxesNum_;
+    int expectedBytes_;
+    double timeout_;
     int axisXpos_;
     int axisYpos_;
     int axisZpos_;

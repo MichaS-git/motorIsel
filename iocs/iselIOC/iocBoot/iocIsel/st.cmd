@@ -1,4 +1,4 @@
-#!../../bin/windows-x64-static/isel
+#!../../bin/linux-x86_64/isel
 
 < envPaths
 
@@ -20,11 +20,5 @@ iocInit
 
 ## motorUtil (allstop & alldone)
 motorUtilInit("isel:")
-
-# we don't want any retrys on the axes
-dbpf isel:m1.RTRY 0
-dbpf isel:m2.RTRY 0
-dbpf isel:m3.RTRY 0
-dbpf isel:m4.RTRY 0
 
 # Boot complete

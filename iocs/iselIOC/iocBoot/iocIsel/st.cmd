@@ -1,4 +1,4 @@
-#!../../bin/linux-x86_64/isel
+#!../../bin/windows-x64-static/isel
 
 < envPaths
 
@@ -9,9 +9,6 @@ dbLoadDatabase "dbd/isel.dbd"
 isel_registerRecordDeviceDriver pdbbase
 
 cd "${TOP}/iocBoot/${IOC}"
-
-## motorUtil (allstop & alldone)
-dbLoadRecords("$(MOTOR)/db/motorUtil.db", "P=isel:")
 
 ## 
 < motor.cmd.iMC

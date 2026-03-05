@@ -1,10 +1,13 @@
+## motorUtil (allstop & alldone)
+dbLoadRecords("$(MOTOR)/db/motorUtil.db", "P=isel:")
+
 dbLoadTemplate("motor.substitutions.iMC")
 
 # linux
-drvAsynSerialPortConfigure("serial1", "/dev/ttyS0", 0, 0, 0)
+#drvAsynSerialPortConfigure("serial1", "/dev/ttyS0", 0, 0, 0)
 # windows
-#drvAsynSerialPortConfigure("serial1","COM2", 0, 0, 0)
-asynSetOption("serial1", -1, "baud", "9600")
+drvAsynSerialPortConfigure("serial1","COM2", 0, 0, 0)
+asynSetOption("serial1", -1, "baud", "19200")
 asynSetOption("serial1", -1, "bits", "8")
 asynSetOption("serial1", -1, "parity", "none")
 asynSetOption("serial1", -1, "stop", "1")
@@ -27,7 +30,7 @@ asynSetOption("serial1", -1, "stop", "1")
 # (@0IE57343 : endschalter low-aktiv + aktivieren)
 # (@0ID13 : X-Achsrichtung invertieren)
 # (@0Ie9 : bei X-Achse Endschalter vertauschen)
-iMCCreateController("iMC_1", "serial1", 2, 1000, 1000, "")
+iMCCreateController("iMC_1", "serial1", 4, 100, 1000, "@0IE57343,@0ID13,@0Ie9")
 
 # Turn off asyn traces
 #asynSetTraceIOMask("serial1",0,0x0)

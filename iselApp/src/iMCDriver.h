@@ -15,7 +15,6 @@ class iMCAxis : public asynMotorAxis
 public:
     /* These are the methods we override from the base class */
     iMCAxis(class iMCController *pC, int axis);
-    void report(FILE *fp, int level);
     asynStatus move(double position, int relative, double min_velocity, double max_velocity, double acceleration);
     asynStatus home(double min_velocity, double max_velocity, double acceleration, int forwards);
     asynStatus poll(bool *moving);
@@ -34,7 +33,6 @@ public:
     iMCController(const char *portName, const char *iMCPortName, int numAxes, double movingPollPeriod, double idlePollPeriod, const char *initCmds);
 
     /* These are the methods that we override from asynMotorDriver */
-    void report(FILE *fp, int level);
     asynStatus writeReadController();
     asynStatus writeReadController(const char *output, char *input, size_t maxChars, size_t *nread, double timeout);
     asynStatus poll();
@@ -42,7 +40,6 @@ public:
 private:
     int totalAxesNum_;
     int expectedBytes_;
-    double timeout_;
     int axisXpos_;
     int axisYpos_;
     int axisZpos_;
@@ -51,6 +48,13 @@ private:
     int axisYdone_;
     int axisZdone_;
     int axisAdone_;
+    bool moveActive_ = false;
+    bool afterMovement_ = false;
+    double movingTime_ = 2;
+    epicsTimeStamp moveStartTime_;
+    double direction_ = 0;
+    double moveVelocity_ = 0;
+    int moveStartPos_ = 0;
 
     friend class iMCAxis;
 };
